@@ -9,79 +9,77 @@ import ssl
 import base64
 
 from colors import colorize
-import trigger
-
-from distutils.util import strtobool
-
-PING_INTERVAL = 30
-PING_TIMEOUT = PING_INTERVAL + 240 # Must be PING_INTERVAL + actual ping timeout
-RETRY_INTERVAL = 60
+from trigger import trigger
+from config import config
 
 locale.setlocale(locale.LC_TIME, "de_DE")
 
-class IrcConnection(trigger.trigger):
-    def __init__(self, server, channel, nick, port, passwort):
-        self.server = server
-        self.channel = channel
-        self.channels = []
-        self.nick = nick
-        self.port = port
-        self.passwort = passwort
-        self.admin = "janus!Janus@bnc.animux.de"
-        self.sasl = True
-        self.ssl = True
-        self.command_list = '001 002 003 004 005 250 251 252 253 254 255 265 266 372 375 376'
-        self.version = "v0.2.0"
-        self.realname = "python BOT"
+class IrcConnection(trigger, config):
+    def __init__(self, configfile):
+        self.configfile = configfile
+        self.config = self.read()
+        self.widelands = self.config._sections
+        self.widelands['server']['ssl'] = self.config.getboolean('server', 'ssl')
+        self.widelands['server']['sasl'] = self.config.getboolean('server', 'sasl')
+        self.widelands['server']['port'] = self.config.getint('server', 'port')
+        self.widelands['server']['retry'] = self.config.getint('server', 'retry')
+        self.widelands['nickserv']['replay'] = self.config.getboolean('nickserv', 'replay')
+        self.widelands['admin']['debug'] = self.config.getboolean('admin', 'debug')
+        self.widelands['ping']['interval'] = self.config.getint('ping', 'interval')
+        self.widelands['ping']['timeout'] = self.config.getint('ping', 'timeout')
+        self.widelands['ping']['pending'] = self.config.getboolean('ping', 'pending')
+        self.widelands['ping']['use'] = self.config.getboolean('ping', 'use')
+        if ',' in self.widelands['channel']['liste']:
+            self.channels = self.widelands['channel']['liste'].split(', ')
 
+        self.command_list = '001 002 003 004 005 250 251 252 253 254 255 265 266 372 375 376 404'
+        self.version = "v0.3.3"
         self.connection = None
         self.buffer = ""
         self.last_ping = 0
         self.last_pong = 0
         self.start_time = 0
-        self.ping_pending = False
-
         self.queue = []
         self.lock = threading.Lock()
         self.quit_loop = False
-
-        self.DEBUG = False
-        self.trigger = "{}, ".format(self.nick)
+        self.trigger = "{}, ".format(self.widelands['nickserv']['username'])
         self.time_format = "%d.%m.%Y %H:%M:%S"
-        self.use_ping = False
-        self.nickserv_replay = False
 
     def connect_server(self):
-        print(colorize("Connecting to {}:{}".format(self.server, self.port), 'brown', 'shell'))
+        print(colorize("Connecting to {}:{}".format(self.widelands['server']['server'],
+            self.widelands['server']['port']), 'brown', 'shell'))
 
         while not self.connection:
             try:
                 self.connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                if self.ssl:
+                if self.widelands['server']['ssl']:
                     self.connection = ssl.wrap_socket(self.connection,
                             do_handshake_on_connect=True,
                             suppress_ragged_eofs=True)
-                self.connection.connect((self.server, self.port))
+                self.connection.connect((self.widelands['server']['server'], 
+                    self.widelands['server']['port']))
             except socket.gaierror:
                 print(colorize("Couldn't resolve server, check your internet connection." \
                        " Re-attempting in 60 seconds.", 'red', 'shell'))
                 self.connection = None
-                time.sleep(RETRY_INTERVAL)
+                time.sleep(self.widelands['server']['retry'])
 
         self.last_ping = time.time()
         self.start_time = time.time()
         self.process_input()
 
-        if self.ssl:
+        if self.widelands['server']['sasl'] and self.widelands['server']['ssl']:
             self.post_string('CAP LS 302\n')
 
-        if not self.sasl and self.ssl:
-            self.post_string('PASS {}:{}\n'.format(self.nick, self.passwort))
+        if not self.widelands['server']['sasl'] and self.widelands['server']['ssl']:
+            self.post_string('PASS {}:{}\n'.format(self.widelands['nickserv']['username'],
+                self.widelands['nickserv']['password']))
 
-        self.post_string('NICK {}\n'.format(self.nick))
-        self.post_string('USER {} {} {} :{}\n'.format(self.nick, '0', '*', self.realname))
+        self.post_string('NICK {}\n'.format(self.widelands['nickserv']['username']))
+        self.post_string('USER {} {} {} :{}\n'.format(self.widelands['nickserv']['username'], 
+            '0', '*', self.widelands['server']['realname']))
 
-        if self.sasl and self.ssl:
+        if self.widelands['server']['sasl'] and self.widelands['server']['ssl']:
             self.post_string('CAP REQ :sasl\n')
 
     def reconnect(self):
@@ -91,14 +89,14 @@ class IrcConnection(trigger.trigger):
         self.connect_server()
 
     def try_ping(self):
-        if self.DEBUG:
+        if self.widelands['admin']['debug']:
             print('try_ping: {}'.format(time.time()))
-        if self.use_ping:
-            self.post_string('PING {}\n'.format(self.server))
-            self.ping_pending = True
+        if self.widelands['ping']['use']:
+            self.post_string('PING {}\n'.format(self.widelands['server']['server']))
+            self.update('ping', 'pending', True)
         else:
             self.last_pong = time.time()
-            self.ping_pending = False
+            self.update('ping', 'pending', False)
 
     def schedule_message(self, message):
         self.lock.acquire()
@@ -108,7 +106,7 @@ class IrcConnection(trigger.trigger):
             self.lock.release()
 
     def format_content(self, line):
-        if self.DEBUG:
+        if self.widelands['admin']['debug']:
             print("format_content_1: {}".format(line))
         if line.startswith(':'):
             source, line = line[1:].split(' ', 1)
@@ -146,7 +144,7 @@ class IrcConnection(trigger.trigger):
                 print("format_content_3: {}:{}".format(len(arguments), arguments))
 
         self.content = text
-        if self.DEBUG:
+        if self.widelands['admin']['debug'] and not self.command in self.command_list:
             print("""format_content_2: hostname: {}
                   name:     {}
                   user:     {}
@@ -166,31 +164,30 @@ class IrcConnection(trigger.trigger):
             line = line.replace('\n', '')
             line = line.replace('\r', '')
             self.format_content(line)
-            if self.sasl and self.ssl:
-                if self.command == 'CAP' and self.target == '{} ACK'.format(self.nick):
+            if self.widelands['server']['sasl'] and self.widelands['server']['ssl']:
+                if self.command == 'CAP' and self.target == '{} ACK'.format(self.widelands['nickserv']['username']):
                     self.post_string('AUTHENTICATE PLAIN\n')
 
                 if self.command == 'AUTHENTICATE' and self.target == '+':
                     auth = '{benutzer}\0{benutzer}\0{passwort}'.format(
-                                    benutzer=self.nick,
-                                    passwort=self.passwort)
+                                    benutzer=self.widelands['nickserv']['username'],
+                                    passwort=self.widelands['nickserv']['password'])
                     self.post_string('AUTHENTICATE {}\n'.format(
                                     base64.b64encode(auth.encode('utf8')).decode('utf8')))
 
-                if self.command == '903' and self.target == self.nick:
+                if self.command == '903' and self.target == self.widelands['nickserv']['username']:
                     self.post_string('CAP END\n')
 
                 if self.command == '908':
-                    self.sasl = False
+                    self.update('server', 'sasl', False)
                     self.reconnect()
 
             if self.command == '376':
-                self.post_string('JOIN {}\n'.format(self.channel))
-                self.post_string('MODE {} +iw\n'.format(self.nick))
-                self.send_notice(colorize('IRC bot initialized successfully', 'green', 'irc'))
                 if len(self.channels) > 0:
                     for channel in self.channels:
                         self.post_string('JOIN {}\n'.format(channel))
+                self.post_string('MODE {} +iw\n'.format(self.widelands['nickserv']['username']))
+                self.send_notice(colorize('IRC bot initialized successfully', 'green', 'irc'))
 
             if self.command == 'PING':
                 self.post_string('PONG {}\n'.format(self.content))
@@ -199,7 +196,7 @@ class IrcConnection(trigger.trigger):
             if self.command == 'PONG':
                 self.last_ping = time.time()
                 self.last_pong = time.time()
-                self.ping_pending = False
+                self.update('ping', 'pending', False)
 
             if self.command == 'KICK' and self.target.split()[1] == self.nick:
                 self.post_string('JOIN {}\n'.format(self.target.split()[0]))
@@ -215,16 +212,15 @@ class IrcConnection(trigger.trigger):
 
             if self.start_time + 2 < time.time():
                 if self.command != "PONG":
-                    if not self.DEBUG and self.command not in self.command_list :
+                    if not self.widelands['admin']['debug'] and self.command not in self.command_list :
                         print("Hostname: {}\nCommand: {}\nTarget: {}\nMessage: {}".format(self.hostname, self.command, self.target, self.content))
 
-                if self.DEBUG and not self.command == '404' and self.command not in self.command_list:
+                if self.widelands['admin']['debug'] and self.command not in self.command_list:
                     self.send_message(line)
 
-            print('{}: {}'.format(colorize("{} {}".format(time.strftime(self.time_format), self.server), 'green', 'shell'), line))
+            print('{}: {}'.format(colorize("{} {}".format(time.strftime(self.time_format), self.widelands['server']['server']), 'green', 'shell'), line))
 
 
-    # Receive bytes from input, and process each new line which was received
     def process_input(self):
         data = self.connection.recv(4096)
         if not data or data == b'':
@@ -234,18 +230,16 @@ class IrcConnection(trigger.trigger):
 
         last_line_complete = (self.buffer[-1] == '\n')
         lines = self.buffer.split('\n')
-        if last_line_complete: # The next buffer should be empty
+        if last_line_complete: 
             lines += ['']
 
-        # Process all complete lines
         for line in lines[:-1]:
             self.process_line(line)
 
-        # Next time append to the last line which is still incomplete
         self.buffer = self.buffer[-1]
 
     def post_string(self, message):
-        print(colorize('{} {}> {}'.format(time.strftime(self.time_format), self.nick, message[:-1]), 'blue', 'shell'))
+        print(colorize('{} {}> {}'.format(time.strftime(self.time_format), self.widelands['nickserv']['username'], message[:-1]), 'blue', 'shell'))
         self.last_ping = time.time()
         self.connection.send(bytes(message, 'utf-8'))
 
@@ -253,19 +247,19 @@ class IrcConnection(trigger.trigger):
         if target:
             self.post_string('NOTICE ' + target + ' :' + message + '\n')
         else:
-            self.post_string('NOTICE ' + self.channel + ' :' + message + '\n')
+            self.post_string('NOTICE ' + self.widelands['channel']['admin'] + ' :' + message + '\n')
 
     def send_message(self, message, target=None):
         if target:
             self.post_string('PRIVMSG ' + target + ' :' + message + '\n')
         else:
-            self.post_string('PRIVMSG ' + self.channel + ' :' + message + '\n')
+            self.post_string('PRIVMSG ' + self.widelands['channel']['admin'] + ' :' + message + '\n')
 
     def stop_loop(self):
         self.quit_loop = True
 
     def loop(self):
-        self.connect_server() # Initial connection attempt
+        self.connect_server()
         k = 0
         while not self.quit_loop:
             try:
@@ -274,26 +268,21 @@ class IrcConnection(trigger.trigger):
                 self.reconnect()
                 continue
 
-            # make sure connection doesn't get dropped
-            if self.last_pong + PING_INTERVAL < time.time() and not self.ping_pending:
+            if self.last_pong + self.widelands['ping']['interval'] < time.time() and not self.widelands['ping']['pending']:
                 self.try_ping()
 
-            # it was too much time since last ping, assume a broken connection
-            if self.last_ping + PING_TIMEOUT < time.time():
+            if self.last_ping + self.widelands['ping']['timeout'] < time.time():
                 self.reconnect()
                 continue
 
             if to_read:
                 r = self.process_input()
 
-            self.lock.acquire()
-            try:
+            with self.lock:
                 while len(self.queue) > 0:
                     print('loop_try_while: {}'.format(self.queue))
                     self.send_notice(self.queue[0])
                     self.queue = self.queue[1:]
-            finally:
-                self.lock.release()
 
     def __del__(self):
         self.connection.close()

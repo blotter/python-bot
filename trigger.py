@@ -11,8 +11,8 @@ locale.setlocale(locale.LC_TIME, "de_DE")
 class trigger:
     def trigger_notice(self):
         if self.hostname == 'NickServ!NickServ@services.':
-            if self.nickserv_replay:
-                self.nickserv_replay = False
+            if self.widelands['nickserv']['replay']:
+                self.update('nickserv', 'replay', False)
                 self.send_message('NICKSERV: {}'.format(self.content))
 
     def trigger_ctcp(self):
@@ -20,7 +20,7 @@ class trigger:
             self.send_notice('\x01ACTION {}\x01'.format(' '.join(str(i) for i in self.content.replace('\x01', '').split()[1:])), self.user)
 
         if self.content.find('\x01VERSION\x01') == 0:
-            self.send_notice('\x01VERSION {}:{}:{}\x01'.format(self.nick, self.version, os.uname()[0]), self.user)
+            self.send_notice('\x01VERSION {}:{}:{}\x01'.format(self.widelands['nickserv']['username'], self.version, os.uname()[0]), self.user)
 
         if self.content.find('\x01TIME\x01') == 0:
             self.send_notice('\x01TIME {}\x01'.format(time.strftime("%A, %d. %B %Y %H:%M:%S %Z")), self.user)
@@ -48,21 +48,21 @@ class trigger:
         split_content = self.content.split()
         if self.content.find('debug') == 7:
             if len(split_content) == 2:
-                self.send_message("Debug: {}".format("AN" if self.DEBUG else "AUS"))
+                self.send_message("Debug: {}".format("AN" if self.widelands['admin']['debug'] else "AUS"), self.target)
             elif len(split_content) >= 3:
                 try:
-                    self.DEBUG = bool(strtobool(split_content[2]))
-                    self.send_message("Debug: {}".format("AN" if self.DEBUG else "AUS"))
+                    self.update('admin', 'debug', bool(strtobool(split_content[2])))
+                    self.send_message("Debug: {}".format("AN" if self.widelands['admin']['debug'] else "AUS"), self.target)
                 except ValueError as Error:
                     self.send_message("Debug: {}".format(Error))
 
         if self.content.find('ping') == 7:
             if len(split_content) == 2:
-                self.send_message("PING: {}".format("AN" if self.use_ping else "AUS"))
+                self.send_message("PING: {}".format("AN" if self.widelands['ping']['use'] else "AUS"), self.target)
             elif len(split_content) >= 3:
                 try:
-                    self.use_ping = bool(strtobool(split_content[2]))
-                    self.send_message("PING: {}".format("AN" if self.use_ping else "AUS"))
+                    self.update('ping', 'use', bool(strtobool(split_content[2])))
+                    self.send_message("PING: {}".format("AN" if self.widelands['ping']['use'] else "AUS"), self.target)
                 except ValueError as Error:
                     self.send_message("PING: {}".format(Error))
 
@@ -81,29 +81,27 @@ class trigger:
                 if len(self.channels) > 0:
                     self.send_message('Ich bin in {}.'.format(', '.join(self.channels)), self.target)
 
-        if self.content.find('reconnect') == 7:
-            if len(split_content) == 2:
-                self.stop_loop()
-                self.reconnect()
-
     def trigger_nickserv(self):
         content = self.content.split()
         print(content[1])
         if content[1] == "register":
-            self.send_message('REGISTER {} {}.freenode@jhor.de'.format(self.passwort, self.nick), 'NICKSERV')
+            self.send_message('REGISTER {} {}.freenode@jhor.de'.format(self.widelands['nickserv']['password'],
+                self.widelands['nickserv']['username']), 'NICKSERV')
 
         if content[1] == "verify":
-            self.send_message('VERIFY REGISTER {} {}'.format(self.nick, content[2]), 'NICKSERV')
+            self.send_message('VERIFY REGISTER {} {}'.format(self.widelands['nickserv']['username'],
+                content[2]), 'NICKSERV')
 
         if content[1] == "identify":
-            self.send_message('IDENTIFY {} {}'.format(self.nick, self.passwort), 'NICKSERV')
+            self.send_message('IDENTIFY {} {}'.format(self.widelands['nickserv']['username'],
+                self.widelands['nickserv']['password']), 'NICKSERV')
 
         if content[1] == "status":
-            self.nickserv_replay = True
+            self.update('nickserv', 'replay', True)
             self.send_message('STATUS', 'NICKSERV')
 
     def trigger_privmsg(self):
-        if self.hostname == self.admin:
+        if self.hostname == self.widelands['admin']['hosts']:
             if re.search('^nickserv', self.content, re.IGNORECASE):
                 print('trigger_nickserv')
                 self.trigger_nickserv()
@@ -116,9 +114,9 @@ class trigger:
                 or self.content.find('{}hallo'.format(self.trigger)) == 0 \
                 or re.search('^hello', self.content, re.IGNORECASE) \
                 or re.search('^hallo', self.content, re.IGNORECASE):
-            self.send_message('Hallo {}'.format(self.user))
+            self.send_message('Hallo {}'.format(self.name), self.target)
 
         if self.content.find('{}ping'.format(self.trigger)) == 0 \
-                or re.search('^ping {}'.format(self.nick), self.content, re.IGNORECASE):
-            self.send_message('pong {}'.format(self.user))
+                or re.search('^ping {}'.format(self.widelands['nickserv']['username']), self.content, re.IGNORECASE):
+            self.send_message('pong {}'.format(self.name), self.target)
 
