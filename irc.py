@@ -18,20 +18,6 @@ class IrcConnection(trigger, config):
     def __init__(self, configfile):
         self.configfile = configfile
         self.config = self.read()
-        self.widelands = self.config._sections
-        self.widelands['server']['ssl'] = self.config.getboolean('server', 'ssl')
-        self.widelands['server']['sasl'] = self.config.getboolean('server', 'sasl')
-        self.widelands['server']['port'] = self.config.getint('server', 'port')
-        self.widelands['server']['retry'] = self.config.getint('server', 'retry')
-        self.widelands['nickserv']['replay'] = self.config.getboolean('nickserv', 'replay')
-        self.widelands['admin']['debug'] = self.config.getboolean('admin', 'debug')
-        self.widelands['ping']['interval'] = self.config.getint('ping', 'interval')
-        self.widelands['ping']['timeout'] = self.config.getint('ping', 'timeout')
-        self.widelands['ping']['pending'] = self.config.getboolean('ping', 'pending')
-        self.widelands['ping']['use'] = self.config.getboolean('ping', 'use')
-        if ',' in self.widelands['channel']['liste']:
-            self.channels = self.widelands['channel']['liste'].split(', ')
-
         self.command_list = '001 002 003 004 005 250 251 252 253 254 255 265 266 372 375 376 404'
         self.version = "v0.3.3"
         self.connection = None
@@ -42,7 +28,6 @@ class IrcConnection(trigger, config):
         self.queue = []
         self.lock = threading.Lock()
         self.quit_loop = False
-        self.trigger = "{}, ".format(self.widelands['nickserv']['username'])
         self.time_format = "%d.%m.%Y %H:%M:%S"
 
     def connect_server(self):

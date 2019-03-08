@@ -70,11 +70,13 @@ class trigger:
             if len(split_content) == 3 and split_content[2].startswith('#'):
                 self.post_string('JOIN {}\n'.format(split_content[2]))
                 self.channels.append(split_content[2])
+                self.update('channels', 'lists', self.channels)
 
         if self.content.find('part') == 7:
             if len(split_content) == 3 and split_content[2].startswith('#'):
                 self.post_string('PART {}\n'.format(split_content[2]))
                 self.channels.remove(split_content[2])
+                self.update('channels', 'lists', self.channels)
 
         if self.content.find('channel') == 7:
             if len(split_content) == 2:
