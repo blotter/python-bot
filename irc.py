@@ -17,7 +17,7 @@ locale.setlocale(locale.LC_TIME, "de_DE")
 class IrcConnection(trigger, config):
     def __init__(self, configfile):
         self.configfile = configfile
-        self.config = self.read()
+        self.read()
         self.command_list = '001 002 003 004 005 250 251 252 253 254 255 265 266 372 375 376 404'
         self.version = "v0.3.3"
         self.connection = None
