@@ -15,8 +15,10 @@ class config:
         self.widelands['ping']['timeout'] = self.config.getint('ping', 'timeout')
         self.widelands['ping']['pending'] = self.config.getboolean('ping', 'pending')
         self.widelands['ping']['use'] = self.config.getboolean('ping', 'use')
-        if ',' in self.widelands['channel']['liste']:
-            self.channels = self.widelands['channel']['liste'].split(', ')
+        self.widelands['webhook']['port'] = self.config.getint('webhook', 'port')
+        self.widelands['webhook']['start'] = self.config.getboolean('webhook', 'start')
+        self.channels = self.widelands['channel']['liste'].split(', ')
+        self.events = self.widelands['channel']['event'].split(', ')
         self.trigger = "{}, ".format(self.widelands['nickserv']['username'])
 
     def write(self):

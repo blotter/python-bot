@@ -41,44 +41,66 @@ class trigger:
         if self.content.find('\x01FINGER\x01') == 0:
             self.send_notice('\x01FINGER Du nicht nehmen Kerze! You don\'t take candle!\x01', self.user)
 
-    def trigger_config(self):
-        split_content = self.content.split()
-        if self.content.find('debug') == 7:
-            if len(split_content) == 2:
+    def trigger_admin(self):
+        content = self.content.split()
+        if content[1] == 'debug':
+            if len(content) == 2:
                 self.send_message("Debug: {}".format("AN" if self.widelands['admin']['debug'] else "AUS"), self.target)
-            elif len(split_content) >= 3:
+            elif len(content) >= 3:
                 try:
-                    self.update('admin', 'debug', bool(strtobool(split_content[2])))
+                    self.update('admin', 'debug', bool(strtobool(content[2])))
                     self.send_message("Debug: {}".format("AN" if self.widelands['admin']['debug'] else "AUS"), self.target)
                 except ValueError as Error:
                     self.send_message("Debug: {}".format(Error))
 
-        if self.content.find('ping') == 7:
-            if len(split_content) == 2:
+        if content[1] == 'ping':
+            if len(content) == 2:
                 self.send_message("PING: {}".format("AN" if self.widelands['ping']['use'] else "AUS"), self.target)
-            elif len(split_content) >= 3:
+            elif len(content) >= 3:
                 try:
-                    self.update('ping', 'use', bool(strtobool(split_content[2])))
+                    self.update('ping', 'use', bool(strtobool(content[2])))
                     self.send_message("PING: {}".format("AN" if self.widelands['ping']['use'] else "AUS"), self.target)
                 except ValueError as Error:
                     self.send_message("PING: {}".format(Error))
 
-        if self.content.find('join') == 7:
-            if len(split_content) == 3 and split_content[2].startswith('#'):
-                self.post_string('JOIN {}\n'.format(split_content[2]))
-                self.channels.append(split_content[2])
-                self.update('channel', 'liste', self.channels)
-
-        if self.content.find('part') == 7:
-            if len(split_content) == 3 and split_content[2].startswith('#'):
-                self.post_string('PART {}\n'.format(split_content[2]))
-                self.channels.remove(split_content[2])
-                self.update('channel', 'liste', self.channels)
-
-        if self.content.find('channel') == 7:
-            if len(split_content) == 2:
+        if content[1] == 'channel':
+            if len(content) == 2:
                 if len(self.channels) > 0:
                     self.send_message('Ich bin in {}.'.format(', '.join(self.channels)), self.target)
+            else:
+                if content[2] == 'join':
+                    if len(content) == 4 and content[3].startswith('#'):
+                        self.post_string('JOIN {}'.format(content[3]))
+                        self.channels.append(content[3])
+                        self.update('channel', 'liste', self.channels)
+                if content[2] == 'part':
+                    if len(content) == 4 and content[3].startswith('#'):
+                        if content[3] in self.channels:
+                            self.post_string('PART {}'.format(content[3]))
+                            self.channels.remove(content[3])
+                            self.update('channel', 'liste', self.channels)
+                        else:
+                            self.send_message('{} ist mir nicht bekannt!'.format(content[3]), self.target)
+
+        if content[1] == 'event':
+            if len(content) == 2:
+                if len(self.events) > 0:
+                    self.send_message('Ich gebe in {} wieder.'.format(', '.join(self.events)), self.target)
+                else:
+                    self.send_message('Ich gebe in keinem Kanal wieder', self.target)
+            else:
+                if content[2] == 'join':
+                    if len(content) == 4 and content[3].startswith('#'):
+                        self.events.append(content[3])
+                        self.update('channel', 'event', self.events)
+                if content[2] == 'part':
+                    if len(content) == 4 and content[3].startswith('#'):
+                        if content[3] in self.events:
+                            self.events.remove(content[3])
+                            self.update('channel', 'event', self.events)
+                        else:
+                            self.send_message('{} ist mir nicht bekannt!'.format(content[3]), self.target)
+
 
     def trigger_nickserv(self):
         content = self.content.split()
@@ -102,8 +124,8 @@ class trigger:
         if self.hostname == self.widelands['admin']['hosts']:
             if re.search('^nickserv', self.content, re.IGNORECASE):
                 self.trigger_nickserv()
-            if re.search('^config', self.content, re.IGNORECASE):
-                self.trigger_config()
+            if re.search('^admin', self.content, re.IGNORECASE):
+                self.trigger_admin()
 
         if self.content.find('{}hello'.format(self.trigger)) == 0 \
                 or self.content.find('{}hallo'.format(self.trigger)) == 0 \

@@ -61,18 +61,18 @@ class IrcConnection(trigger, config):
         self.process_input()
 
         if self.widelands['server']['sasl'] and self.widelands['server']['ssl']:
-            self.post_string('CAP LS 302\n')
+            self.post_string('CAP LS 302')
 
         if not self.widelands['server']['sasl'] and self.widelands['server']['ssl']:
-            self.post_string('PASS {}:{}\n'.format(self.widelands['nickserv']['username'],
+            self.post_string('PASS {}:{}'.format(self.widelands['nickserv']['username'],
                 self.widelands['nickserv']['password']))
 
-        self.post_string('NICK {}\n'.format(self.widelands['nickserv']['username']))
-        self.post_string('USER {} {} {} :{}\n'.format(self.widelands['nickserv']['username'], 
+        self.post_string('NICK {}'.format(self.widelands['nickserv']['username']))
+        self.post_string('USER {} {} {} :{}'.format(self.widelands['nickserv']['username'],
             '0', '*', self.widelands['server']['realname']))
 
         if self.widelands['server']['sasl'] and self.widelands['server']['ssl']:
-            self.post_string('CAP REQ :sasl\n')
+            self.post_string('CAP REQ :sasl')
 
     def reconnect(self):
         self.connection.shutdown(2)
@@ -84,7 +84,7 @@ class IrcConnection(trigger, config):
         if self.widelands['admin']['debug']:
             print('try_ping: {}'.format(time.time()))
         if self.widelands['ping']['use']:
-            self.post_string('PING {}\n'.format(self.widelands['server']['address']))
+            self.post_string('PING {}'.format(self.widelands['server']['address']))
             self.update('ping', 'pending', True)
         else:
             self.last_pong = time.time()
@@ -149,17 +149,17 @@ class IrcConnection(trigger, config):
             self.format_content(line)
             if self.widelands['server']['sasl'] and self.widelands['server']['ssl']:
                 if self.command == 'CAP' and self.target == '{} ACK'.format(self.widelands['nickserv']['username']):
-                    self.post_string('AUTHENTICATE PLAIN\n')
+                    self.post_string('AUTHENTICATE PLAIN')
 
                 if self.command == 'AUTHENTICATE' and self.target == '+':
                     auth = '{benutzer}\0{benutzer}\0{passwort}'.format(
                                     benutzer=self.widelands['nickserv']['username'],
                                     passwort=self.widelands['nickserv']['password'])
-                    self.post_string('AUTHENTICATE {}\n'.format(
+                    self.post_string('AUTHENTICATE {}'.format(
                                     base64.b64encode(auth.encode('utf8')).decode('utf8')))
 
                 if self.command == '903' and self.target == self.widelands['nickserv']['username']:
-                    self.post_string('CAP END\n')
+                    self.post_string('CAP END')
 
                 if self.command == '908':
                     self.update('server', 'sasl', False)
@@ -168,12 +168,12 @@ class IrcConnection(trigger, config):
             if self.command == '376':
                 if len(self.channels) > 0:
                     for channel in self.channels:
-                        self.post_string('JOIN {}\n'.format(channel))
-                self.post_string('MODE {} +iw\n'.format(self.widelands['nickserv']['username']))
+                        self.post_string('JOIN {}'.format(channel))
+                self.post_string('MODE {} +iw'.format(self.widelands['nickserv']['username']))
                 self.send_notice(colorize('IRC bot initialized successfully', 'green', 'irc'))
 
             if self.command == 'PING':
-                self.post_string('PONG {}\n'.format(self.content))
+                self.post_string('PONG {}'.format(self.content))
                 self.last_ping = time.time()
 
             if self.command == 'PONG':
@@ -182,7 +182,7 @@ class IrcConnection(trigger, config):
                 self.update('ping', 'pending', False)
 
             if self.command == 'KICK' and self.target.split()[1] == self.nick:
-                self.post_string('JOIN {}\n'.format(self.target.split()[0]))
+                self.post_string('JOIN {}'.format(self.target.split()[0]))
 
             if re.search('^\x01', self.content) and re.search('\x01$', self.content):
                 self.trigger_ctcp()
@@ -222,30 +222,29 @@ class IrcConnection(trigger, config):
         self.buffer = lines[-1]
 
     def post_string(self, message):
+        message = "{}\n".format(message)
         print(colorize('{} {}> {}'.format(time.strftime(self.time_format),
             self.widelands['nickserv']['username'], message[:-1]), 'blue', 'shell'))
         self.last_ping = time.time()
-        #self.connection.send(bytes(message, 'utf-8'))
         self.connection.send(message.encode('utf-8'))
 
     def send_notice(self, message, target=None):
-        if target:
-            self.post_string('NOTICE ' + target + ' :' + message + '\n')
-        else:
-            self.post_string('NOTICE ' + self.widelands['channel']['admin'] + ' :' + message + '\n')
+        targets = target if target else self.widelands['channel']['admin']
+        self.post_string('NOTICE {} :{}'.format(targets, message))
 
     def send_message(self, message, target=None):
-        if target:
-            self.post_string('PRIVMSG ' + target + ' :' + message + '\n')
+        targets = target if target else self.widelands['channel']['admin']
+        if isinstance(targets, list):
+            for target in targets:
+                self.post_string('PRIVMSG {} :{}'.format(target, message))
         else:
-            self.post_string('PRIVMSG ' + self.widelands['channel']['admin'] + ' :' + message + '\n')
+            self.post_string('PRIVMSG {} :{}'.format(targets, message))
 
     def stop_loop(self):
         self.quit_loop = True
 
     def loop(self):
         self.connect_server()
-        k = 0
         while not self.quit_loop:
             try:
                 to_read, _, _ = select.select([self.connection], [], [], 1)
@@ -265,7 +264,7 @@ class IrcConnection(trigger, config):
 
             with self.lock:
                 while not self.queue.empty():
-                    self.send_notice(self.queue.get())
+                    self.send_message(self.queue.get(), self.events)
                     self.queue = self.queue.task_done()
 
     def __del__(self):
