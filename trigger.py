@@ -6,14 +6,11 @@ import os
 
 from distutils.util import strtobool
 
-locale.setlocale(locale.LC_TIME, "de_DE")
-
 class trigger:
     def trigger_notice(self):
-        if self.hostname == 'NickServ!NickServ@services.':
-            if self.widelands['nickserv']['replay']:
-                self.update('nickserv', 'replay', False)
-                self.send_message('NICKSERV: {}'.format(self.content))
+        if self.hostname == 'NickServ!NickServ@services.' and self.widelands['nickserv']['replay']:
+            self.update('nickserv', 'replay', False)
+            self.send_message('NICKSERV: {}'.format(self.content))
 
     def trigger_ctcp(self):
         if self.content.find('\x01ACTION') == 0 and re.search('\x01$', self.content, re.IGNORECASE):
@@ -70,13 +67,13 @@ class trigger:
             if len(split_content) == 3 and split_content[2].startswith('#'):
                 self.post_string('JOIN {}\n'.format(split_content[2]))
                 self.channels.append(split_content[2])
-                self.update('channels', 'lists', self.channels)
+                self.update('channel', 'liste', self.channels)
 
         if self.content.find('part') == 7:
             if len(split_content) == 3 and split_content[2].startswith('#'):
                 self.post_string('PART {}\n'.format(split_content[2]))
                 self.channels.remove(split_content[2])
-                self.update('channels', 'lists', self.channels)
+                self.update('channel', 'liste', self.channels)
 
         if self.content.find('channel') == 7:
             if len(split_content) == 2:
@@ -85,10 +82,9 @@ class trigger:
 
     def trigger_nickserv(self):
         content = self.content.split()
-        print(content[1])
         if content[1] == "register":
-            self.send_message('REGISTER {} {}.freenode@jhor.de'.format(self.widelands['nickserv']['password'],
-                self.widelands['nickserv']['username']), 'NICKSERV')
+            self.send_message('REGISTER {} {}'.format(self.widelands['nickserv']['password'],
+                self.widelands['nickserv']['email']), 'NICKSERV')
 
         if content[1] == "verify":
             self.send_message('VERIFY REGISTER {} {}'.format(self.widelands['nickserv']['username'],
@@ -105,11 +101,8 @@ class trigger:
     def trigger_privmsg(self):
         if self.hostname == self.widelands['admin']['hosts']:
             if re.search('^nickserv', self.content, re.IGNORECASE):
-                print('trigger_nickserv')
                 self.trigger_nickserv()
             if re.search('^config', self.content, re.IGNORECASE):
-                print('trigger_config')
-                print('Content: {}\nCommand: {}\nTarget: {}\n'.format(self.content, self.command, self.target))
                 self.trigger_config()
 
         if self.content.find('{}hello'.format(self.trigger)) == 0 \

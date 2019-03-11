@@ -79,9 +79,21 @@ def handle_forward_push(irc, data):
 
     print("Push event")
 
+def handle_delete_branch(irc, data):
+    author = colorize(data['pusher']['name'], 'bold', 'irc')
+    action = colorize('deleted', 'red', 'irc')
+
+    branch = data['ref'].split('/')[-1]
+    branch = colorize(branch, 'bold-blue', 'irc')
+
+    irc.schedule_message("{} {} {} {}"
+            .format(fmt_repo(data), author, action, branch))
+
 def handle_push_event(irc, data):
     if data['forced']:
         handle_force_push(irc, data)
+    elif data['deleted']:
+        handle_delete_branch(irc, data)
     else:
         handle_forward_push(irc, data)
 
@@ -109,6 +121,60 @@ def handle_pull_request(irc, data):
     irc.schedule_message('{} {} {} pull request {}: {} ({})'
             .format(repo, author, action, pr_num, title, link))
 
+
+def handle_issue(irc, data):
+    repo = fmt_repo(data)
+    user = colorize(data['sender']['login'], 'bold', 'irc')
+
+    action = data['action']
+    if not action in ['opened', 'closed']:
+        return
+    action_color = 'red' if action == 'opened' else 'green'
+    action = colorize(action, action_color, 'irc')
+
+    issue_num = colorize('#' + str(data['issue']['number']), 'bold-blue', 'irc')
+    title = data['issue']['title']
+    link = short_gh_link(data['issue']['html_url'])
+
+    irc.schedule_message('{} {} {} issue {}: {} ({})'
+            .format(repo, user, action, issue_num, title, link))
+
+def handle_status_event(irc, data):
+    if data['state'] == 'success':
+        color = 'bold-green'
+    elif data['state'] == 'error':
+        color = 'red'
+    elif data['state'] == 'failure':
+        color = 'bold-red'
+    elif data['state'] == 'pending':
+        return
+        color = 'bold-teal'
+    else:
+        print('Status: {}'.format(data['state']))
+        color = 'black'
+
+    repo = fmt_repo(data)
+    repo_name = data['repository']['full_name']
+    after_id = data['sha'][:12]
+    befor_id = data['commit']['parents'][0]['sha'][:12]
+    commit_id = colorize(after_id, 'bold', 'irc')
+    desc = colorize(data['description'], color, 'irc')
+    target_url = data['target_url'].split('?', 1)[0]
+    change_url = 'https://github.com/{}/compare/{}...{}'.format(repo_name, befor_id, after_id)
+    change = colorize('Change view:', 'teal', 'irc')
+    build = colorize('Build details:', 'teal', 'irc')
+    commit_msg = colorize(data['commit']['commit']['message'], 'green', 'irc')
+    branch = colorize(data['branches'][0]['name'], 'bold-blue', 'irc')
+
+    irc.schedule_message('{} {} on {}: {}'
+            .format(repo, commit_id, branch, desc))
+    irc.schedule_message('{} {} {}'
+            .format(change, commit_msg, short_gh_link(change_url)))
+    irc.schedule_message('{} {}'
+            .format(build, target_url))
+
+    print('Status event')
+
 def handle_ping_event(irc, data):
     print("Ping event")
 
@@ -119,5 +185,10 @@ def handle_event(irc, event, data):
         handle_push_event(irc, data)
     elif event == 'pull_request':
         handle_pull_request(irc, data)
+    elif event == 'issues':
+        handle_issue(irc, data)
+    elif event == 'status':
+        handle_status_event(irc, data)
     else:
         print("Unknown event type: " + event)
+    print('handle_event: {}'.format(event))

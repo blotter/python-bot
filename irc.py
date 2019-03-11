@@ -7,6 +7,7 @@ import re
 import locale
 import ssl
 import base64
+import queue
 
 from colors import colorize
 from trigger import trigger
@@ -18,20 +19,20 @@ class IrcConnection(trigger, config):
     def __init__(self, configfile):
         self.configfile = configfile
         self.read()
-        self.command_list = '001 002 003 004 005 250 251 252 253 254 255 265 266 372 375 376 404'
-        self.version = "v0.3.3"
+        self.command_list = ['001', '002', '003', '004', '005', '250', '251', '252', '253', '254', '255', '265', '266', '372', '375', '376', '404']
+        self.version = "v0.3.5"
         self.connection = None
         self.buffer = ""
         self.last_ping = 0
         self.last_pong = 0
         self.start_time = 0
-        self.queue = []
+        self.queue = queue.Queue()
         self.lock = threading.Lock()
         self.quit_loop = False
         self.time_format = "%d.%m.%Y %H:%M:%S"
 
     def connect_server(self):
-        print(colorize("Connecting to {}:{}".format(self.widelands['server']['server'],
+        print(colorize("Connecting to {}:{}".format(self.widelands['server']['address'],
             self.widelands['server']['port']), 'brown', 'shell'))
 
         while not self.connection:
@@ -41,16 +42,22 @@ class IrcConnection(trigger, config):
                     self.connection = ssl.wrap_socket(self.connection,
                             do_handshake_on_connect=True,
                             suppress_ragged_eofs=True)
-                self.connection.connect((self.widelands['server']['server'], 
+                self.connection.connect((self.widelands['server']['address'],
                     self.widelands['server']['port']))
             except socket.gaierror:
                 print(colorize("Couldn't resolve server, check your internet connection." \
                        " Re-attempting in 60 seconds.", 'red', 'shell'))
                 self.connection = None
                 time.sleep(self.widelands['server']['retry'])
+            except ConnectionRefusedError:
+                print(colorize("Couldn't connect to server, check your internet connection." \
+                       " Re-attempting in 60 seconds.", 'red', 'shell'))
+                self.connection = None
+                time.sleep(self.widelands['server']['retry'])
 
         self.last_ping = time.time()
         self.start_time = time.time()
+        self.update('admin', 'debug', False)
         self.process_input()
 
         if self.widelands['server']['sasl'] and self.widelands['server']['ssl']:
@@ -77,18 +84,15 @@ class IrcConnection(trigger, config):
         if self.widelands['admin']['debug']:
             print('try_ping: {}'.format(time.time()))
         if self.widelands['ping']['use']:
-            self.post_string('PING {}\n'.format(self.widelands['server']['server']))
+            self.post_string('PING {}\n'.format(self.widelands['server']['address']))
             self.update('ping', 'pending', True)
         else:
             self.last_pong = time.time()
             self.update('ping', 'pending', False)
 
     def schedule_message(self, message):
-        self.lock.acquire()
-        try:
-            self.queue.append(message)
-        finally:
-            self.lock.release()
+        with self.lock:
+            self.queue.put(message)
 
     def format_content(self, line):
         if self.widelands['admin']['debug']:
@@ -97,39 +101,34 @@ class IrcConnection(trigger, config):
             source, line = line[1:].split(' ', 1)
         else:
             source = None
-        search = re.compile(r'([^!]*)!?([^@]*)@?(.*)')
-        match = search.match(source or '')
         self.hostname = source
+
+        match = re.match(r'([^!]*)!?([^@]*)@?(.*)', source or '')
         self.name, self.user, self.host = match.groups()
-        if not self.host and not self.user:
-            if self.name.find('.') >= 0:
-                self.host = self.name
-                self.name = ''
+        if not ( self.host or self.user ) and '.' in self.name:
+            self.host = self.name
+            self.name = ''
 
         if ' :' in line:
             arguments, text = line.split(' :', 1)
         else:
             arguments, text = line, ''
-        arguments = arguments.split()
+        arguments = arguments.split(' ', 1)
 
-        if len(arguments) == 0:
-            self.command = None
-            self.target = None
-        elif len(arguments) == 1:
+        if len(arguments) == 1:
             self.command = arguments[0]
             self.target = None
         elif len(arguments) == 2:
             self.command = arguments[0]
             self.target = arguments[1]
         else:
-            try:
-                self.command = arguments[0]
-                self.target = ' '.join(str(i) for i in arguments[1:])
-            except:
-                print("format_content_3: {}:{}".format(len(arguments), arguments))
+            # sollte nie passieren
+            self.command = None
+            self.target = None
+            print("format_content_3: {}:{}".format(len(arguments), arguments))
 
         self.content = text
-        if self.widelands['admin']['debug'] and not self.command in self.command_list:
+        if self.widelands['admin']['debug']:
             print("""format_content_2: hostname: {}
                   name:     {}
                   user:     {}
@@ -146,8 +145,7 @@ class IrcConnection(trigger, config):
 
     def process_line(self, line):
         if len(line) > 0:
-            line = line.replace('\n', '')
-            line = line.replace('\r', '')
+            line = line.rstrip('\r\n')
             self.format_content(line)
             if self.widelands['server']['sasl'] and self.widelands['server']['ssl']:
                 if self.command == 'CAP' and self.target == '{} ACK'.format(self.widelands['nickserv']['username']):
@@ -195,15 +193,16 @@ class IrcConnection(trigger, config):
             if self.command == 'NOTICE' and not re.search('\x01$', self.content):
                 self.trigger_notice()
 
-            if self.start_time + 2 < time.time():
-                if self.command != "PONG":
-                    if not self.widelands['admin']['debug'] and self.command not in self.command_list :
-                        print("Hostname: {}\nCommand: {}\nTarget: {}\nMessage: {}".format(self.hostname, self.command, self.target, self.content))
+            if self.start_time + 4 < time.time():
+                if not self.widelands['admin']['debug'] and self.command not in self.command_list:
+                    print("Hostname: {}\nCommand: {}\nTarget: {}\nMessage: {}".format(
+                        self.hostname, self.command, self.target, self.content))
 
                 if self.widelands['admin']['debug'] and self.command not in self.command_list:
                     self.send_message(line)
 
-            print('{}: {}'.format(colorize("{} {}".format(time.strftime(self.time_format), self.widelands['server']['server']), 'green', 'shell'), line))
+            print('{}: {}'.format(colorize("{} {}".format(time.strftime(self.time_format),
+                self.widelands['server']['address']), 'green', 'shell'), line))
 
 
     def process_input(self):
@@ -213,20 +212,21 @@ class IrcConnection(trigger, config):
 
         self.buffer += data.decode('utf-8')
 
-        last_line_complete = (self.buffer[-1] == '\n')
         lines = self.buffer.split('\n')
-        if last_line_complete: 
+        if self.buffer[-1] == '\n':
             lines += ['']
 
         for line in lines[:-1]:
             self.process_line(line)
 
-        self.buffer = self.buffer[-1]
+        self.buffer = lines[-1]
 
     def post_string(self, message):
-        print(colorize('{} {}> {}'.format(time.strftime(self.time_format), self.widelands['nickserv']['username'], message[:-1]), 'blue', 'shell'))
+        print(colorize('{} {}> {}'.format(time.strftime(self.time_format),
+            self.widelands['nickserv']['username'], message[:-1]), 'blue', 'shell'))
         self.last_ping = time.time()
-        self.connection.send(bytes(message, 'utf-8'))
+        #self.connection.send(bytes(message, 'utf-8'))
+        self.connection.send(message.encode('utf-8'))
 
     def send_notice(self, message, target=None):
         if target:
@@ -264,10 +264,9 @@ class IrcConnection(trigger, config):
                 r = self.process_input()
 
             with self.lock:
-                while len(self.queue) > 0:
-                    print('loop_try_while: {}'.format(self.queue))
-                    self.send_notice(self.queue[0])
-                    self.queue = self.queue[1:]
+                while not self.queue.empty():
+                    self.send_notice(self.queue.get())
+                    self.queue = self.queue.task_done()
 
     def __del__(self):
         self.connection.close()
