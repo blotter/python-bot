@@ -13,7 +13,6 @@ from colors import colorize
 from trigger import trigger
 from config import config
 
-locale.setlocale(locale.LC_TIME, "de_DE")
 
 class IrcConnection(trigger, config):
     def __init__(self, configfile):
@@ -26,10 +25,13 @@ class IrcConnection(trigger, config):
         self.last_ping = 0
         self.last_pong = 0
         self.start_time = 0
+        self.kick_rejoin = 0
+        self.rejoin_chan = None
         self.queue = queue.Queue()
         self.lock = threading.Lock()
         self.quit_loop = False
         self.time_format = "%d.%m.%Y %H:%M:%S"
+        locale.setlocale(locale.LC_TIME, self.widelands['locale']['lang'])
 
     def connect_server(self):
         print(colorize("Connecting to {}:{}".format(self.widelands['server']['address'],
@@ -181,8 +183,14 @@ class IrcConnection(trigger, config):
                 self.last_pong = time.time()
                 self.update('ping', 'pending', False)
 
-            if self.command == 'KICK' and self.target.split()[1] == self.nick:
-                self.post_string('JOIN {}'.format(self.target.split()[0]))
+            if self.command == 'KICK' and self.target.split()[1] == self.widelands['nickserv']['username']:
+                self.kick_rejoin = time.time()
+                self.rejoin_chan = self.target.split()[0]
+
+            if self.kick_rejoin > 0 and self.kick_rejoin + 5 < time.time():
+                self.kick_rejoin = 0
+                self.post_string('JOIN {}'.format(self.rejoin_chan))
+                self.rejoin_chan = None
 
             if re.search('^\x01', self.content) and re.search('\x01$', self.content):
                 self.trigger_ctcp()
